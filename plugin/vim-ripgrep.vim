@@ -4,6 +4,7 @@ endif
 
 let g:loaded_rg = 1
 
+" --- Configuration ---
 if !exists('g:rg_binary')
     let g:rg_binary = 'rg'
 endif
@@ -22,6 +23,7 @@ endif
 
 let s:last_search = ""
 
+" --- Core Functions ---
 fun! s:Rg(txt)
     call s:RgGrepContext(function('s:RgSearch'), s:RgSearchTerm(a:txt))
 endfun
@@ -32,42 +34,41 @@ fun! s:RgSearchTerm(txt)
         return s:last_search
     else
         let s:last_search = a:txt
+        " Escape % for Vim command line, though grep! usually handles it
         let searchtxt = substitute(a:txt, "[%]", "\\\\\\0", "g")
-        " let searchtxt = shellescape(searchtxt)
-        " :echomsg searchtxt
         return searchtxt
     endif
 endfun
 
 fun! s:RgSearch(txt)
+    " Execute the grep
     silent! exe 'grep! ' . a:txt
+
     if len(getqflist())
         copen
-        redraw!
+        redraw
         if exists('g:rg_highlight')
             call s:RgHighlight(a:txt)
         endif
     else
         cclose
-        redraw!
-        " echo "No match found for " . a:txt
+        redraw
         echo "No match found for " . s:last_search
     endif
 endfun
 
 fun! s:RgDeriveRoot()
-    if exists('g:rg_derive_root')
-        return g:rg_derive_root != 0
-    else
-        return 1
-    endif
+    return get(g:, 'rg_derive_root', 1)
 endfun
 
 fun! s:RgGrepContext(search, txt)
+    " Save global grep settings
     let l:grepprgb = &grepprg
     let l:grepformatb = &grepformat
     let &grepprg = g:rg_command
     let &grepformat = g:rg_format
+
+    " Prevent screen flickering during silent grep
     let l:te = &t_te
     let l:ti = &t_ti
     set t_te=
@@ -79,28 +80,46 @@ fun! s:RgGrepContext(search, txt)
         call a:search(a:txt)
     endif
 
-    let &t_te=l:te
-    let &t_ti=l:ti
+    " Restore settings
+    let &t_te = l:te
+    let &t_ti = l:ti
     let &grepprg = l:grepprgb
     let &grepformat = l:grepformatb
 endfun
 
 fun! s:RgPathContext(search, txt)
-    let l:cwdb = getcwd()
-    exe 'lcd '.s:RgRootDir()
-    call a:search(a:txt)
-    exe 'lcd '.l:cwdb
+    let l:orig_win = win_getid()
+    let l:orig_cwd = getcwd()
+    let l:root = s:RgRootDir()
+
+    " Change directory in the current window.
+    exe 'lcd ' . fnameescape(l:root)
+
+    try
+        call a:search(a:txt)
+    finally
+        " Restore directory specifically in the window we started from.
+        " This prevents the Quickfix window focus from breaking the CWD restore.
+        if exists('*win_execute')
+            call win_execute(l:orig_win, 'lcd ' . fnameescape(l:orig_cwd))
+        else
+            " Fallback for older Vim versions
+            let l:curr_win = win_getid()
+            call win_gotoid(l:orig_win)
+            exe 'lcd ' . fnameescape(l:orig_cwd)
+            call win_gotoid(l:curr_win)
+        endif
+    endtry
 endfun
 
+" --- Helper Functions ---
 fun! s:RgHighlight(txt)
-    " let @/=escape(substitute(a:txt, '"', '', 'g'), '|')
-    let @/=escape(substitute(s:last_search, '\\', '', 'g'), '|')
+    let @/ = escape(substitute(s:last_search, '\\', '', 'g'), '|')
     call feedkeys(":let &hlsearch=1\<CR>", 'n')
 endfun
 
 fun! s:RgRootDir()
     let l:cwd = getcwd()
-    " let l:dirs = split(getcwd(), '/')
     let l:dirs = split(expand('%:p:h'), '/')
 
     for l:dir in reverse(copy(l:dirs))
@@ -131,5 +150,6 @@ fun! s:RgShowRoot()
     endif
 endfun
 
+" --- Commands ---
 command! -nargs=* -complete=file Rg :call s:Rg(<q-args>)
 command! -nargs=* -complete=file RgRoot :call s:RgShowRoot()
