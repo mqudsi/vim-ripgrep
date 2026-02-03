@@ -18,7 +18,17 @@ if !exists('g:rg_command')
 endif
 
 if !exists('g:rg_root_types')
-    let g:rg_root_types = ['.git', 'configure']
+    let g:rg_root_types = [
+        \ '.git',
+        \ 'Cargo.toml',
+        \ 'CMakeLists.txt',
+        \ 'Makefile',
+        \ 'go.mod',
+        \ 'package.json',
+        \ 'pyproject.toml',
+        \ 'tsconfig.json',
+        \ '.ignore'
+    \ ]
 endif
 
 let s:last_search = ""
@@ -119,19 +129,35 @@ fun! s:RgHighlight(txt)
 endfun
 
 fun! s:RgRootDir()
-    let l:cwd = getcwd()
-    let l:dirs = split(expand('%:p:h'), '/')
+    let l:start_dir = expand('%:p:h')
 
-    for l:dir in reverse(copy(l:dirs))
+    " If buffer has no file, or we are in a special buffer, use CWD
+    if empty(l:start_dir) || &buftype != ''
+        return getcwd()
+    endif
+
+    let l:curr = l:start_dir
+    let l:home = $HOME
+
+    " Search ancestors for project root
+    while 1
         for l:type in g:rg_root_types
-            let l:path = s:RgMakePath(l:dirs, l:dir)
-            if s:RgHasFile(l:path.'/'.l:type)
-                return l:path
+            let l:path = l:curr . '/' . l:type
+            if filereadable(l:path) || isdirectory(l:path)
+                return l:curr
             endif
         endfor
-    endfor
 
-    return l:cwd
+        " Abort search at pre-defined stopping points
+        if l:curr ==# l:home || l:curr ==# '/' || l:curr ==# fnamemodify(l:curr, ':h')
+            break
+        endif
+
+        let l:curr = fnamemodify(l:curr, ':h')
+    endwhile
+
+    " Default to CWD if no project root was found
+    return getcwd()
 endfun
 
 fun! s:RgMakePath(dirs, dir)
